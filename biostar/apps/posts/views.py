@@ -7,7 +7,7 @@ from django.core.urlresolvers import reverse
 from crispy_forms.helper import FormHelper
 from crispy_forms.layout import Layout, Field, Fieldset, Div, Submit, ButtonHolder
 from django.shortcuts import render
-from django.http import HttpResponseRedirect
+from django.http import HttpResponseRedirect, HttpRequest
 from django.contrib import messages
 from . import auth
 from braces.views import LoginRequiredMixin
@@ -19,7 +19,26 @@ from biostar.const import OrderedDict
 from django.core.exceptions import ValidationError
 from django.contrib.auth.decorators import login_required
 from django.views.decorators.csrf import csrf_exempt
+import re
 import logging
+
+import langdetect
+
+
+def english_only(text):
+    try:
+        text.decode('ascii')
+    except Exception:
+        raise ValidationError('Title may only contain plain text (ASCII) characters')
+
+
+def valid_language(text):
+    supported_languages = settings.LANGUAGE_DETECTION
+    if supported_languages:
+        lang = langdetect.detect(text)
+        if lang not in supported_languages:
+            raise ValidationError(
+                    'Language "{0}" is not one of the supported languages {1}!'.format(lang, supported_languages))
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +80,7 @@ class LongForm(forms.Form):
 
     title = forms.CharField(
         label="Post Title",
-        max_length=200, min_length=10, validators=[valid_title],
+        max_length=200, min_length=10, validators=[valid_title, english_only],
         help_text="Descriptive titles promote better answers.")
 
     post_type = forms.ChoiceField(
@@ -74,7 +93,7 @@ class LongForm(forms.Form):
         help_text="Choose one or more tags to match the topic. To create a new tag just type it in and press ENTER.",
     )
 
-    content = forms.CharField(widget=forms.Textarea,
+    content = forms.CharField(widget=forms.Textarea,validators=[valid_language],
                               min_length=80, max_length=15000,
                               label="Enter your post below")
 
@@ -190,6 +209,12 @@ class NewPost(LoginRequiredMixin, FormView):
             for field in settings.EXTERNAL_SESSION_FIELDS:
                 initial[field] = sess[settings.EXTERNAL_SESSION_KEY].get(field)
             del sess[settings.EXTERNAL_SESSION_KEY]
+
+	prev_url = str(request.META['HTTP_REFERER'])
+        if re.search('/t/\w+/',prev_url):
+	    tags = prev_url.split('/')
+	    tag = tags[-2]
+	    initial['tag_val'] = tag
 
         form = self.form_class(initial=initial)
         return render(request, self.template_name, {'form': form})
